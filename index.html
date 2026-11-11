@@ -70,15 +70,16 @@ ul.tight li{margin:3px 0}
 
 <!-- ================= FILE PANEL ================= -->
 <div id="paneFile" class="tabc">
-<label class="pick">Choose a file<input id="file" type="file"></label>
+<p class="hint" style="margin-top:0"><b>How this works:</b> 1 · choose a file &nbsp;→&nbsp; 2 · choose what to do &nbsp;→&nbsp; 3 · press the green button. The button always matches the action you chose. Your original file is never modified — a clean copy is made separately and must pass verification before you may save it.</p>
+<label class="pick">1 · Choose a file<input id="file" type="file"></label>
 <p class="hint" id="selected">No file selected</p>
 <div id="imgOpts">
-<label>Action
+<label>2 · Choose what to do
 <select id="mode">
-<option value="both" selected>Inspect &amp; scrub</option>
-<option value="inspect">Inspect only · change nothing</option>
+<option value="both" selected>Inspect &amp; scrub — show what’s inside, then build a verified clean copy</option>
+<option value="inspect">Inspect only — show what’s inside, change nothing, make no copy</option>
 </select></label>
-<label id="strengthLabel">Pixel treatment
+<label id="strengthLabel">3 · Pixel treatment (applies to the clean copy)
 <select id="strength">
 <option value="0">Metadata only · pixels untouched</option>
 <option value="1">Light · slight noise</option>
@@ -96,13 +97,14 @@ ul.tight li{margin:3px 0}
 
 <!-- ================= TEXT PANEL ================= -->
 <div id="paneText" class="tabc" hidden>
-<label>Paste text to clean
+<p class="hint" style="margin-top:0"><b>How this works:</b> 1 · paste the text &nbsp;→&nbsp; 2 · press the green button. You get a cleaned copy plus two reports: what was removed, and what only you can judge.</p>
+<label>1 · Paste text to clean
 <textarea id="txtIn" placeholder="Paste here…" spellcheck="false"></textarea></label>
 <label><input type="checkbox" id="optUrls" checked> Strip tracking parameters from links (utm_, fbclid, gclid, si, …)</label>
 <label><input type="checkbox" id="optPunct" checked> Normalize smart quotes, dashes, ligatures to plain characters</label>
 <label><input type="checkbox" id="optHomo" checked> Replace look-alike Cyrillic/Greek letters (homoglyphs) when text is mostly Latin</label>
 <div class="actions">
-<button id="goText">Scan &amp; clean text</button>
+<button id="goText">2 · Clean text &amp; show reports</button>
 <button id="clearText" class="secondary">Clear</button>
 </div>
 <p class="hint">Always removed: zero-width and invisible characters, bidi overrides, variation selectors, control characters. Always flagged for your review: emails, phone numbers, dates, handles, usernames in paths, tokens — the tool cannot know which words identify you. Only you can remove those.</p>
@@ -660,6 +662,13 @@ function controls(v){
 
 $("tabFile").onclick = () => { $("tabFile").classList.add("on"); $("tabText").classList.remove("on"); $("paneFile").hidden = false; $("paneText").hidden = true; };
 $("tabText").onclick = () => { $("tabText").classList.add("on"); $("tabFile").classList.remove("on"); $("paneText").hidden = false; $("paneFile").hidden = true; };
+function syncAction(){
+ const inspectOnly = $("mode").value === "inspect";
+ $("go").textContent = inspectOnly ? "Run inspection only" : "Inspect & scrub";
+ $("strengthLabel").hidden = inspectOnly;
+}
+$("mode").onchange = () => { syncAction(); clearAll(); $("status").textContent = $("mode").value === "inspect" ? "Inspect-only selected. Nothing will be changed and no copy will be made." : "Ready. Your original file is never modified."; };
+syncAction();
 $("file").onchange = () => { $("selected").textContent = $("file").files[0] ? $("file").files[0].name + " · " + $("file").files[0].size.toLocaleString() + " bytes" : "No file selected"; };
 $("clear").onclick = () => { clearAll(); $("file").value = ""; $("selected").textContent = "No file selected"; $("status").textContent = "Session cleared. Original file untouched."; };
 $("clearText").onclick = () => { clearAll(); $("txtIn").value = ""; };
@@ -746,9 +755,14 @@ $("go").onclick = async () => {
    $("status").textContent = "Stopped: this file type needs a desktop tool.";
    return;
   }
-  const beforeCard = findingsCard("BEFORE — what your file carries", before, $("results"));
+  const inspectOnly = $("mode").value === "inspect";
+  const beforeCard = findingsCard(inspectOnly ? "INSPECTION REPORT — what your file carries" : "BEFORE — what your file carries", before, $("results"));
   const img = el("img", null, beforeCard); img.alt = "original preview"; img.src = objectURL(f);
-  if($("mode").value === "inspect"){ $("status").textContent = "Inspection done — nothing was changed."; return; }
+  if(inspectOnly){
+   el("p", "Inspect-only run — nothing was changed and no clean copy was made. To build one, switch the action above to “Inspect & scrub”.", beforeCard).className = "hint";
+   $("status").textContent = "Inspection done — nothing was changed, no copy was made.";
+   return;
+  }
   $("status").textContent = "Scrubbing…";
   const level = Number($("strength").value);
   const clean = await scrubImage(f, level);
