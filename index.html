@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>Scrubber</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101b1b;color:#ecf5ef;font:16px/1.6 system-ui,-apple-system,sans-serif}
+main{max-width:820px;margin:auto;padding:32px 18px calc(40px + env(safe-area-inset-bottom))}
+h1{font-size:clamp(30px,6vw,44px);line-height:1.15;letter-spacing:-1px;margin:14px 0 8px}
+h2{font-size:20px;margin:0 0 10px}
+h3{font-size:16px;margin:18px 0 6px}
+em{font-style:normal;color:#a4dfb6}
+.badge{font-size:11px;letter-spacing:3px;color:#a4dfb6}
+.sub,.hint,footer{color:#aabbb4}
+.panel,.card{background:#1b2a28;border:1px solid #354c44;border-radius:18px;padding:20px;margin:22px 0}
+.card.good{border-color:#3f8f5f}
+.card.bad{border-color:#a04545}
+.card.stop{border-color:#c9a13b;background:#241f14}
+label{display:block;margin:14px 0}
+select,input[type=file],textarea,button{font:inherit;max-width:100%}
+select{width:100%;background:#101b1b;color:#ecf5ef;padding:12px;border:1px solid #4c655b;border-radius:10px;margin-top:6px}
+textarea{width:100%;min-height:150px;background:#101b1b;color:#ecf5ef;border:1px solid #4c655b;border-radius:10px;padding:12px;font:14px/1.5 ui-monospace,monospace}
+.pick{border:1px dashed #84ba98;padding:18px;border-radius:12px}
+.pick input{display:block;margin-top:8px;width:100%}
+button{cursor:pointer;border:0;border-radius:10px;background:#b1edc1;color:#10251a;padding:12px 18px;font-weight:650}
+button:disabled{opacity:.5}
+.secondary{background:transparent;color:#c4dacf;border:1px solid #536e61}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.hint,footer{font-size:13px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#101b1b;border-radius:10px;padding:12px;font-size:13px;margin:8px 0}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:8px 0}
+td,th{text-align:left;padding:6px 8px;border-bottom:1px solid #2c403a;vertical-align:top;overflow-wrap:anywhere}
+td.k{color:#a4dfb6;width:38%}
+tr.high td{color:#f2b8b8}
+tr.high td.k{color:#ff9d9d;font-weight:700}
+tr.med td{color:#e8d9a8}
+tr.info td{color:#9fb3ab}
+img{max-width:100%;height:auto;border-radius:12px;display:block;margin:12px 0}
+.verdict{font-weight:700;font-size:17px;padding:10px 14px;border-radius:10px;margin:12px 0}
+.verdict.ok{background:#173a26;color:#9fe8b4}
+.verdict.no{background:#3d1d1d;color:#f2a3a3}
+.verdict.warn{background:#3a2f14;color:#ecd391}
+.stop-title{color:#ecd391;font-weight:700;font-size:18px}
+[hidden]{display:none!important}
+.tabs{display:flex;gap:8px;margin:20px 0 0}
+.tabs button{flex:1;border-radius:10px 10px 0 0;background:#16211f;color:#9fb3ab;border:1px solid #354c44;border-bottom:0}
+.tabs button.on{background:#1b2a28;color:#ecf5ef;font-weight:700}
+.tabc{border:1px solid #354c44;border-top:0;border-radius:0 0 18px 18px;padding:20px;background:#1b2a28}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #fff;outline-offset:2px}
+ul.tight{margin:6px 0;padding-left:20px}
+ul.tight li{margin:3px 0}
+</style>
+</head>
+<body>
+<main>
+<header>
+<span class="badge">LOCAL SCRUB TOOL · NOTHING IS UPLOADED</span>
+<h1>See what a file says about you.<br><em>Then take it out.</em></h1>
+<p class="sub">Decodes embedded metadata, shows it to you, builds a fresh clean copy, and verifies the copy before you may save it. All processing happens on this device.</p>
+</header>
+
+<div class="tabs">
+<button id="tabFile" class="on">File / image</button>
+<button id="tabText">Pasted text</button>
+</div>
+
+<!-- ================= FILE PANEL ================= -->
+<div id="paneFile" class="tabc">
+<label class="pick">Choose a file<input id="file" type="file"></label>
+<p class="hint" id="selected">No file selected</p>
+<div id="imgOpts">
+<label>Pixel treatment
+<select id="strength">
+<option value="0">Metadata only · pixels untouched</option>
+<option value="1">Light · slight noise</option>
+<option value="2" selected>Strong · noise + resize + blur</option>
+<option value="3">Maximum · heavy noise + resize + blur</option>
+</select></label>
+<p class="hint">Pixel treatments fight sensor-noise and processing fingerprinting. They alter the picture slightly and are <b>not</b> a guarantee against image matching. Only pixel treatments resist camera-sensor fingerprinting; metadata-only mode does not.</p>
+</div>
+<div class="actions">
+<button id="go">Inspect &amp; scrub</button>
+<button id="clear" class="secondary">Clear session</button>
+</div>
+<p id="status" role="status" aria-live="polite" class="hint">Ready. Your original file is never modified.</p>
+</div>
+
+<!-- ================= TEXT PANEL ================= -->
+<div id="paneText" class="tabc" hidden>
+<label>Paste text to clean
+<textarea id="txtIn" placeholder="Paste here…" spellcheck="false"></textarea></label>
+<label><input type="checkbox" id="optUrls" checked> Strip tracking parameters from links (utm_, fbclid, gclid, si, …)</label>
+<label><input type="checkbox" id="optPunct" checked> Normalize smart quotes, dashes, ligatures to plain characters</label>
+<label><input type="checkbox" id="optHomo" checked> Replace look-alike Cyrillic/Greek letters (homoglyphs) when text is mostly Latin</label>
+<div class="actions">
+<button id="goText">Scan &amp; clean text</button>
+<button id="clearText" class="secondary">Clear</button>
+</div>
+<p class="hint">Always removed: zero-width and invisible characters, bidi overrides, variation selectors, control characters. Always flagged for your review: emails, phone numbers, dates, handles, usernames in paths, tokens — the tool cannot know which words identify you. Only you can remove those.</p>
+</div>
+
+<div id="results"></div>
+
+<footer>
+<p>What this checks: EXIF (all fields, decoded), GPS coordinates, camera/lens serials, owner names, XMP edit history, IPTC captions, colour profiles, comments, embedded thumbnails, PNG text chunks, WebP chunks, PDF document fields, Office document properties, container metadata.</p>
+<p>What no tool can remove: what is visible or audible in the content itself — faces, signs, screens, voices, distinctive wording. Review content yourself. Saved copies keep real dimensions and file type; a determined examiner can still tell a JPEG is a JPEG.</p>
+</footer>
+</main>
+
+<script>
+"use strict";
+/* ============================================================
+   utilities
+============================================================ */
+const $ = id => document.getElementById(id);
+const urls = new Set();
+function objectURL(b){ const u = URL.createObjectURL(b); urls.add(u); return u; }
+function rand(){ const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0]/4294967296; }
+function el(tag, text, parent){ const e = document.createElement(tag); if(text != null) e.textContent = text; parent.append(e); return e; }
+function esc(s){ return String(s).slice(0, 400); }
+const txt = (u,a,b) => { let s=""; const e = Math.min(b,u.length); for(let i=a;i<e;i++) s += String.fromCharCode(u[i]); return s; };
+
+/* ============================================================
+   EXIF / TIFF decoder  — decodes real field values
+============================================================ */
+const TSIZE = {1:1,2:1,3:2,4:4,5:8,6:1,7:1,8:2,9:4,10:8,11:4,12:8};
+const IFD0_TAGS = {
+ 0x010E:"Image description",0x010F:"Camera make",0x0110:"Camera model",0x0112:"Orientation",
+ 0x0131:"Software",0x0132:"Date modified",0x013B:"Artist",0x013E:"White point",0x013F:"Primary chromaticities",
+ 0x0211:"YCbCr coefficients",0x0213:"YCbCr positioning",0x0214:"Reference black/white",
+ 0x8298:"Copyright",0x83BB:"IPTC data",0x8649:"Photoshop data",0x8769:"Exif sub-block",0x8825:"GPS sub-block",
+ 0x02BC:"XMP data",0x9C9B:"Windows title",0x9C9C:"Windows comment",0x9C9D:"Windows author",0x9C9E:"Windows keywords",0x9C9F:"Windows subject",
+ 0xA005:"Interop sub-block",0x4746:"Rating",0x4749:"Rating percent"
+};
+const EXIF_TAGS = {
+ 0x829A:"Exposure time",0x829D:"F-number",0x8827:"ISO speed",0x9000:"Exif version",
+ 0x9003:"Date taken",0x9004:"Date digitized",0x9101:"Components",0x9201:"Shutter speed",
+ 0x9202:"Aperture",0x9204:"Exposure bias",0x9207:"Metering mode",0x9209:"Flash",
+ 0x920A:"Focal length",0x927C:"Maker note (vendor data)",0x9286:"User comment",
+ 0xA000:"Flashpix version",0xA001:"Color space",0xA002:"Pixel width",0xA003:"Pixel height",
+ 0xA005:"Interop offset",0xA20E:"Focal plane X res",0xA20F:"Focal plane Y res",0xA210:"Focal plane unit",
+ 0xA217:"Sensing method",0xA300:"File source",0xA301:"Scene type",0xA401:"Custom rendered",
+ 0xA402:"Exposure mode",0xA403:"White balance",0xA404:"Digital zoom",0xA405:"Focal length 35mm",
+ 0xA406:"Scene capture type",0xA407:"Gain control",0xA408:"Contrast",0xA409:"Saturation",0xA40A:"Sharpness",
+ 0xA430:"Owner name",0xA431:"Body serial number",0xA432:"Lens info",0xA433:"Lens make",
+ 0xA434:"Lens model",0xA435:"Lens serial number",0xA420:"Image unique ID",0xA436:"Camera owner title",
+ 0x9400:"Temperature",0x9401:"Humidity",0x9402:"Pressure",0x9403:"Water depth",0x9404:"Acceleration",0x9405:"Camera elevation angle"
+};
+const GPS_TAGS = {
+ 0:"GPS version",1:"Latitude ref",2:"Latitude",3:"Longitude ref",4:"Longitude",5:"Altitude ref",
+ 6:"Altitude",7:"GPS time",8:"Satellites",9:"Status",10:"Measure mode",11:"DOP",12:"Speed ref",
+ 13:"Speed",14:"Track ref",15:"Track",16:"Image direction ref",17:"Image direction",18:"Map datum",
+ 23:"Destination bearing ref",24:"Destination bearing",29:"GPS date",31:"H positioning error"
+};
+const SENSITIVE_HIGH = new Set(["Latitude","Longitude","Altitude","GPS time","GPS date","Owner name","Body serial number","Lens serial number","Camera owner title","Image unique ID","Artist","Windows author","GPS LOCATION"]);
+const SENSITIVE_MED = new Set(["Camera make","Camera model","Lens make","Lens model","Software","Date taken","Date digitized","Date modified","User comment","Image description","Copyright","Maker note (vendor data)","Windows title","Windows comment","Windows keywords","Windows subject","Creator tool","Edit history","Caption","Author","Last saved by","Company","Document ID","Instance ID"]);
+
+function riskOf(label){
+ if(SENSITIVE_HIGH.has(label)) return "high";
+ if(SENSITIVE_MED.has(label)) return "med";
+ return "info";
+}
+function pushF(findings, label, value, where){
+ if(value == null || value === "") return;
+ findings.push({label, value: esc(value), where, risk: riskOf(label)});
+}
+
+function readTiffValue(u8, dv, little, base, type, count, valOff){
+ const size = (TSIZE[type]||1) * count;
+ let p;
+ if(size <= 4){ p = valOff; } else { p = base + dv.getUint32(valOff, little); }
+ if(p < 0 || p + size > u8.length) return null;
+ const at = i => p + i;
+ if(type === 2){ let s = ""; for(let i=0;i<count;i++){ const c = u8[at(i)]; if(c===0) break; s += String.fromCharCode(c); } return s; }
+ if(type === 7){
+   if(count > 512) return "[" + count + " bytes of binary data]";
+   let s = ""; for(let i=0;i<count;i++){ const c = u8[at(i)]; s += (c>=32&&c<127) ? String.fromCharCode(c) : "."; } return s.replace(/\.+$/,"") || "["+count+" bytes binary]";
+ }
+ if(type === 3){ const a=[]; for(let i=0;i<Math.min(count,16);i++) a.push(dv.getUint16(at(i*2), little)); return count===1 ? a[0] : a.join(", "); }
+ if(type === 4){ const a=[]; for(let i=0;i<Math.min(count,16);i++) a.push(dv.getUint32(at(i*4), little)); return count===1 ? a[0] : a.join(", "); }
+ if(type === 9){ const a=[]; for(let i=0;i<Math.min(count,16);i++) a.push(dv.getInt32(at(i*4), little)); return count===1 ? a[0] : a.join(", "); }
+ if(type === 5){ const a=[]; for(let i=0;i<Math.min(count,6);i++){ const n=dv.getUint32(at(i*8), little), d=dv.getUint32(at(i*8)+4, little); a.push(d===0?"?":(n/d).toPrecision(6).replace(/\.?0+$/,"")); } return count===1 ? a[0] : a.join(", "); }
+ if(type === 10){ const a=[]; for(let i=0;i<Math.min(count,6);i++){ const n=dv.getInt32(at(i*8), little), d=dv.getInt32(at(i*8)+4, little); a.push(d===0?"?":(n/d).toPrecision(6)); } return count===1 ? a[0] : a.join(", "); }
+ if(type === 1){ if(count===1) return u8[p]; let s=""; for(let i=0;i<Math.min(count,24);i++) s += u8[at(i)].toString(16).padStart(2,"0"); return s; }
+ return "[" + count + " value(s), type " + type + "]";
+}
+
+function readRationals(u8, dv, little, base, count, valOff){
+ const p = base + dv.getUint32(valOff, little);
+ const out = [];
+ for(let i=0;i<count;i++){ out.push([dv.getUint32(p+i*8, little), dv.getUint32(p+i*8+4, little)]); }
+ return out;
+}
+
+function parseIFD(u8, dv, little, base, ifdOff, tagTable, where, findings, depth, gps){
+ if(depth > 4 || ifdOff <= 0 || base + ifdOff + 2 > u8.length) return;
+ const n = dv.getUint16(base + ifdOff, little);
+ let exifPtr = 0, gpsPtr = 0, interopPtr = 0;
+ let gpsVals = {};
+ for(let i=0;i<n;i++){
+  const e = base + ifdOff + 2 + i*12;
+  if(e + 12 > u8.length) break;
+  const tag = dv.getUint16(e, little), type = dv.getUint16(e+2, little), count = dv.getUint32(e+4, little);
+  if(tag === 0x8769){ exifPtr = dv.getUint32(e+8, little); continue; }
+  if(tag === 0x8825){ gpsPtr = dv.getUint32(e+8, little); continue; }
+  if(tag === 0xA005 && !gps){ interopPtr = dv.getUint32(e+8, little); continue; }
+  const label = tagTable[tag] || ("Tag 0x" + tag.toString(16));
+  if(gps){
+   if(tag === 2 || tag === 4 || tag === 6 || tag === 7){
+    try{ gpsVals[tag] = readRationals(u8, dv, little, base, count, e+8); }catch(_){}
+    continue;
+   }
+   const v = readTiffValue(u8, dv, little, base, type, count, e+8);
+   gpsVals[tag] = v;
+   continue;
+  }
+  const v = readTiffValue(u8, dv, little, base, type, count, e+8);
+  if(label === "Maker note (vendor data)"){ pushF(findings, label, "[" + count + " bytes — vendor-specific data, may contain serials/sensor IDs]", where); continue; }
+  if(label === "IPTC data" || label === "Photoshop data"){ pushF(findings, label, "[" + count + " bytes — may contain captions, names, locations]", where); continue; }
+  if(typeof v === "number" && (label === "Orientation" || label.startsWith("Tag"))) continue;
+  pushF(findings, label, v, where);
+ }
+ if(gps){
+  let dec = null;
+  try{
+   const lat = gpsVals[2], lon = gpsVals[4];
+   if(lat && lon){
+    const dms = r => r[0][0]/ (r[0][1]||1) + (r[1][0]/(r[1][1]||1))/60 + (r[2][0]/(r[2][1]||1))/3600;
+    let la = dms(lat), lo = dms(lon);
+    if(String(gpsVals[1]).trim().toUpperCase() === "S") la = -la;
+    if(String(gpsVals[3]).trim().toUpperCase() === "W") lo = -lo;
+    dec = la.toFixed(6) + ", " + lo.toFixed(6);
+   }
+  }catch(_){}
+  if(dec){
+   findings.push({label:"GPS LOCATION", value: dec + "  (maps: https://www.openstreetmap.org/?mlat=" + dec.split(",")[0] + "&mlon=" + dec.split(",")[1].trim() + ")", where, risk:"high"});
+  }
+  const labelOrder = [[6,"Altitude"],[7,"GPS time"],[29,"GPS date"],[13,"Speed"],[17,"Image direction"],[8,"Satellites"]];
+  for(const [t,lab] of labelOrder){
+   if(gpsVals[t] == null) continue;
+   let v = gpsVals[t];
+   if(Array.isArray(v)){ v = v.map(r => (r[0]/(r[1]||1)).toPrecision(6).replace(/\.?0+$/,"")).join(":"); }
+   pushF(findings, lab, v, where);
+  }
+  return;
+ }
+ if(exifPtr) parseIFD(u8, dv, little, base, exifPtr, EXIF_TAGS, where + " · Exif", findings, depth+1, false);
+ if(gpsPtr) parseIFD(u8, dv, little, base, gpsPtr, GPS_TAGS, where + " · GPS", findings, depth+1, true);
+ if(interopPtr){ /* interop rarely identifying; skip */ }
+}
+
+function parseEXIF(u8, findings){
+ try{
+  if(u8.length < 14) return;
+  const base = 6;
+  const little = u8[base] === 0x49;
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.length);
+  if(dv.getUint16(base+2, little) !== 42) return;
+  parseIFD(u8, dv, little, base, dv.getUint32(base+4, little), IFD0_TAGS, "EXIF", findings, 0, false);
+  const ifd1 = dv.getUint32(base + dv.getUint32(base+4, little) + 2 + dv.getUint16(base + dv.getUint32(base+4, little), little)*12, little);
+  if(ifd1 && base + ifd1 + 2 <= u8.length){
+   const n = dv.getUint16(base + ifd1, little);
+   let thumbOff = 0, thumbLen = 0;
+   for(let i=0;i<n;i++){
+    const e = base + ifd1 + 2 + i*12;
+    if(e + 12 > u8.length) break;
+    const tag = dv.getUint16(e, little);
+    if(tag === 0x0201) thumbOff = dv.getUint32(e+8, little);
+    if(tag === 0x0202) thumbLen = dv.getUint32(e+8, little);
+   }
+   if(thumbOff && thumbLen) findings.push({label:"Embedded thumbnail", value: thumbLen + " bytes — often shows the ORIGINAL unedited/uncropped image", where:"EXIF", risk:"high"});
+  }
+ }catch(e){ /* tolerate malformed EXIF */ }
+}
+
+/* ============================================================
+   container scanners
+============================================================ */
+function scanJPEG(u8, findings, notes){
+ let p = 2, sawEnd = false;
+ const dv = new DataView(u8.buffer, u8.byteOffset, u8.length);
+ while(p < u8.length){
+  if(u8[p++] !== 0xFF) break;
+  while(p < u8.length && u8[p] === 0xFF) p++;
+  if(p >= u8.length) break;
+  const m = u8[p++];
+  if(m === 0xD9){ sawEnd = true; break; }
+  if(m === 0xDA){
+   if(p+2 > u8.length) break;
+   const n = dv.getUint16(p); p += n;
+   while(p < u8.length){ if(u8[p++] !== 0xFF) continue; while(p < u8.length && u8[p] === 0xFF) p++; if(p >= u8.length) break; const nx = u8[p]; if(nx === 0 || (nx >= 0xD0 && nx <= 0xD7)){ p++; continue; } p--; break; }
+   continue;
+  }
+  if(m === 0x01 || (m >= 0xD0 && m <= 0xD7) || m === 0xD8) continue;
+  if(p+2 > u8.length) break;
+  const n = dv.getUint16(p);
+  if(n < 2 || p + n > u8.length) break;
+  const seg = u8.subarray(p+2, p+n);
+  if(m === 0xE1){
+   if(txt(seg,0,6) === "Exif\0\0"){ parseEXIF(seg, findings); }
+   else if(txt(seg,0,29) === "http://ns.adobe.com/xap/1.0/\0"){
+    let x = "";
+    for(let i=29;i<seg.length;i++){ const c = seg[i]; x += (c>=32&&c<127)||c===10||c===13||c===9 ? String.fromCharCode(c) : " "; }
+    const grab = (re) => { const mm = x.match(re); return mm ? mm[1].replace(/\s+/g," ").trim() : null; };
+    pushF(findings, "Creator tool", grab(/xmp:CreatorTool>([^<]+)</), "XMP");
+    pushF(findings, "Creator", grab(/dc:creator[^>]*>.*?<rdf:li[^>]*>([^<]+)</s) || grab(/dc:creator>([^<]+)</), "XMP");
+    pushF(findings, "Edit history", (x.match(/stEvt:softwareAgent/g)||[]).length ? (x.match(/stEvt:softwareAgent/g).length + " editing step(s) recorded with software names") : null, "XMP");
+    pushF(findings, "Document ID", grab(/xmpMM:DocumentID="([^"]+)"/), "XMP");
+    pushF(findings, "Instance ID", grab(/xmpMM:InstanceID="([^"]+)"/), "XMP");
+    pushF(findings, "XMP packet", n + " bytes total (shown: key fields; packet may contain more)", "XMP");
+   }
+   else pushF(findings, "APP1 block", n + " bytes (unrecognized content)", "JPEG");
+  }
+  else if(m === 0xE2){ pushF(findings, "Colour profile (ICC)", n + " bytes — device/software fingerprint, can shift colors if removed", "JPEG"); }
+  else if(m === 0xED){ pushF(findings, "Photoshop/IPTC block", n + " bytes — may contain captions, keywords, author", "JPEG"); }
+  else if(m === 0xFE){ pushF(findings, "Comment", txt(seg, 0, Math.min(seg.length, 200)), "JPEG"); }
+  else if(m >= 0xE3 && m <= 0xEF){ pushF(findings, "APP" + (m-0xE0) + " block", n + " bytes", "JPEG"); }
+  p += n;
+ }
+ if(!sawEnd) notes.push("JPEG end marker not found where expected — file may be truncated or unusual.");
+}
+
+function scanPNG(u8, findings, notes){
+ let p = 8, sawEnd = false;
+ const dv = new DataView(u8.buffer, u8.byteOffset, u8.length);
+ const SAFE = new Set(["IHDR","PLTE","IDAT","IEND","tRNS","sRGB","gAMA","cHRM","pHYs","sBIT","bKGD","hIST","sPLT"]);
+ while(p + 12 <= u8.length){
+  const n = dv.getUint32(p), t = txt(u8, p+4, p+8);
+  if(n > u8.length - p - 12) break;
+  const data = u8.subarray(p+8, p+8+n);
+  if(t === "tEXt" || t === "iTXt" || t === "zTXt"){
+   let s = txt(data, 0, Math.min(data.length, 300)).replace(/[^\x20-\x7E\n]/g, ".");
+   findings.push({label:"PNG text chunk (" + t + ")", value: s, where:"PNG", risk:"med"});
+  } else if(t === "tIME"){ findings.push({label:"PNG timestamp", value: n + " bytes — modification time stored", where:"PNG", risk:"med"}); }
+  else if(t === "eXIf"){ findings.push({label:"PNG EXIF block", value: n + " bytes — may contain GPS/camera data", where:"PNG", risk:"high"}); }
+  else if(t === "iCCP"){ findings.push({label:"Colour profile (ICC)", value: n + " bytes", where:"PNG", risk:"info"}); }
+  else if(!SAFE.has(t) && t.charCodeAt(0) > 64){ findings.push({label:"PNG chunk " + t, value: n + " bytes (uncommon chunk — unknown content)", where:"PNG", risk:"info"}); }
+  p += 12 + n;
+  if(t === "IEND"){ sawEnd = true; break; }
+ }
+ if(!sawEnd) notes.push("PNG end chunk not found where expected.");
+}
+
+function scanWebP(u8, findings){
+ const dv = new DataView(u8.buffer, u8.byteOffset, u8.length);
+ let p = 12;
+ while(p + 8 <= u8.length){
+  const t = txt(u8, p, p+4), n = dv.getUint32(p+4, true);
+  if(t === "EXIF") findings.push({label:"WebP EXIF", value: n + " bytes — may contain GPS/camera data", where:"WebP", risk:"high"});
+  if(t === "XMP ") findings.push({label:"WebP XMP", value: n + " bytes — author/history possible", where:"WebP", risk:"med"});
+  if(t === "ICCP") findings.push({label:"Colour profile (ICC)", value: n + " bytes", where:"WebP", risk:"info"});
+  p += 8 + n + (n % 2);
+ }
+}
+
+function scanPDF(u8, findings, notes){
+ let s = "";
+ for(let i=0;i<u8.length;i++){ const c = u8[i]; s += (c>=32&&c<127)||c===10||c===13 ? String.fromCharCode(c) : " "; }
+ const grab = key => { const m = s.match(new RegExp("/" + key + "\\s*\\(([^)]{0,200})\\)")); return m ? m[1] : null; };
+ pushF(findings, "Author", grab("Author"), "PDF");
+ pushF(findings, "Creator", grab("Creator"), "PDF");
+ pushF(findings, "Producer", grab("Producer"), "PDF");
+ pushF(findings, "Title", grab("Title"), "PDF");
+ pushF(findings, "Subject", grab("Subject"), "PDF");
+ pushF(findings, "Keywords", grab("Keywords"), "PDF");
+ pushF(findings, "Creation date", grab("CreationDate"), "PDF");
+ pushF(findings, "Modification date", grab("ModDate"), "PDF");
+ if(/\/XMP|xpacket begin/i.test(s)) findings.push({label:"XMP metadata stream", value:"present — may contain author, history, IDs", where:"PDF", risk:"med"});
+ if(/\/JavaScript|\/JS\b/.test(s)) findings.push({label:"JavaScript actions", value:"present — active content", where:"PDF", risk:"high"});
+ if(/\/EmbeddedFile/.test(s)) findings.push({label:"Embedded files", value:"present — attachments inside the PDF", where:"PDF", risk:"high"});
+ if(/\/Annot/.test(s)) findings.push({label:"Annotations", value:"present — comments/markup may carry reviewer names", where:"PDF", risk:"med"});
+ if(/\/Sig\b|\/ByteRange/.test(s)) findings.push({label:"Digital signature", value:"present — identifies the signer", where:"PDF", risk:"med"});
+ notes.push("PDF scan is a surface scan of readable fields only. PDFs can hide data in layers, incremental saves, forms, and compressed streams that this scan cannot see.");
+}
+
+async function scanZipOffice(u8, findings, notes){
+ const dv = new DataView(u8.buffer, u8.byteOffset, u8.length);
+ let eocd = -1;
+ for(let i = u8.length - 22; i >= Math.max(0, u8.length - 70000); i--){
+  if(u8[i]===0x50 && u8[i+1]===0x4B && u8[i+2]===0x05 && u8[i+3]===0x06){ eocd = i; break; }
+ }
+ if(eocd < 0){ notes.push("Could not read archive directory."); return; }
+ const count = dv.getUint16(eocd+10, true), cdOff = dv.getUint32(eocd+16, true);
+ let p = cdOff; const members = [];
+ for(let i=0;i<count && p+46<=u8.length;i++){
+  if(u8[p]!==0x50||u8[p+1]!==0x4B||u8[p+2]!==0x01||u8[p+3]!==0x02) break;
+  const method = dv.getUint16(p+10, true), csize = dv.getUint32(p+20, true);
+  const nlen = dv.getUint16(p+28, true), elen = dv.getUint16(p+30, true), clen = dv.getUint16(p+32, true);
+  const lho = dv.getUint32(p+42, true);
+  const name = txt(u8, p+46, p+46+nlen);
+  members.push({name, method, csize, lho});
+  p += 46 + nlen + elen + clen;
+ }
+ const isOffice = members.some(m => /docProps\/(core|app)\.xml/.test(m.name));
+ const interesting = members.filter(m => /docProps|comments|people|notesSlide|vbaProject|embeddings|customXml/i.test(m.name));
+ if(isOffice){
+  for(const m of interesting){
+   if(/core\.xml|app\.xml|custom\.xml/.test(m.name) && (m.method === 8 || m.method === 0) && "DecompressionStream" in window){
+    try{
+     const lnlen = dv.getUint16(m.lho+26, true), lelen = dv.getUint16(m.lho+28, true);
+     const dataOff = m.lho + 30 + lnlen + lelen;
+     const comp = u8.subarray(dataOff, dataOff + m.csize);
+     let raw;
+     if(m.method === 0) raw = comp;
+     else{
+      const ds = new DecompressionStream("deflate-raw");
+      const stream = new Blob([comp]).stream().pipeThrough(ds);
+      raw = new Uint8Array(await new Response(stream).arrayBuffer());
+     }
+     let s = ""; for(let i=0;i<raw.length;i++){ const c = raw[i]; s += (c>=32&&c<127)||c===62 ? String.fromCharCode(c) : " "; }
+     const grab = tag => { const mm = s.match(new RegExp("<[^>]*" + tag + "[^>]*>([^<]{0,200})<")); return mm ? mm[1].trim() : null; };
+     pushF(findings, "Author", grab("creator"), "Office");
+     pushF(findings, "Last saved by", grab("lastModifiedBy"), "Office");
+     pushF(findings, "Company", grab("Company"), "Office");
+     pushF(findings, "Manager", grab("Manager"), "Office");
+     pushF(findings, "Application", grab("Application"), "Office");
+     pushF(findings, "Created", grab("created"), "Office");
+     pushF(findings, "Modified", grab("modified"), "Office");
+     pushF(findings, "Revision", grab("revision"), "Office");
+     pushF(findings, "Title", grab("title"), "Office");
+     pushF(findings, "Template", grab("Template"), "Office");
+     if(/TotalTime>([0-9]+)</.test(s)) pushF(findings, "Total editing time", s.match(/TotalTime>([0-9]+)</)[1] + " minutes", "Office");
+    }catch(e){ /* skip unreadable part */ }
+   }
+   if(/comments|people/i.test(m.name)) findings.push({label:"Review data", value: m.name + " — comments/reviewer identities inside", where:"Office", risk:"high"});
+   if(/notesSlide/i.test(m.name)) findings.push({label:"Speaker notes", value: m.name, where:"Office", risk:"med"});
+   if(/vbaProject/i.test(m.name)) findings.push({label:"Macros", value: m.name + " — active content", where:"Office", risk:"high"});
+   if(/embeddings/i.test(m.name)) findings.push({label:"Embedded objects", value: m.name, where:"Office", risk:"med"});
+  }
+ } else {
+  pushF(findings, "Archive contents", members.length + " member(s): " + members.slice(0,12).map(m=>m.name).join(", ") + (members.length>12?" …":""), "ZIP");
+ }
+}
+
+/* ============================================================
+   top-level inspection
+============================================================ */
+function magicType(u8){
+ if(u8.length >= 4 && u8[0]===0xFF && u8[1]===0xD8) return {label:"JPEG image", kind:"image"};
+ if(u8.length >= 8 && [137,80,78,71,13,10,26,10].every((v,i)=>u8[i]===v)) return {label:"PNG image", kind:"image"};
+ if(u8.length >= 6 && txt(u8,0,3)==="GIF") return {label:"GIF image", kind:"image"};
+ if(u8.length >= 12 && txt(u8,0,4)==="RIFF" && txt(u8,8,12)==="WEBP") return {label:"WebP image", kind:"image"};
+ if(u8.length >= 12 && txt(u8,4,8)==="ftyp"){
+  const brand = txt(u8,8,12);
+  if(/^(heic|heix|hevc|hevx|mif1|msf1)/.test(brand)) return {label:"HEIC/HEIF image", kind:"image"};
+  if(/^(avif|avis)/.test(brand)) return {label:"AVIF image", kind:"image"};
+  return {label:"MP4/MOV/QuickTime media (" + brand + ")", kind:"av"};
+ }
+ if(u8.length >= 5 && txt(u8,0,5)==="%PDF-") return {label:"PDF document", kind:"doc"};
+ if(u8.length >= 4 && u8[0]===0x50 && u8[1]===0x4B) return {label:"ZIP-based package (Office document, archive, or app)", kind:"doc"};
+ if(u8.length >= 3 && txt(u8,0,3)==="ID3" || (u8[0]===0xFF && (u8[1]&0xE0)===0xE0)) return {label:"MP3/audio", kind:"av"};
+ if(u8.length >= 4 && txt(u8,0,4)==="fLaC") return {label:"FLAC audio", kind:"av"};
+ if(u8.length >= 4 && txt(u8,0,4)==="OggS") return {label:"Ogg audio/video", kind:"av"};
+ if(u8.length >= 12 && txt(u8,0,4)==="RIFF" && txt(u8,8,12)==="WAVE") return {label:"WAV audio", kind:"av"};
+ return {label:"Unknown format", kind:"unknown"};
+}
+
+async function inspect(blob){
+ const u8 = new Uint8Array(await blob.arrayBuffer());
+ const findings = [], notes = [];
+ const t = magicType(u8);
+ if(t.label === "JPEG image") scanJPEG(u8, findings, notes);
+ else if(t.label === "PNG image") scanPNG(u8, findings, notes);
+ else if(t.label === "WebP image") scanWebP(u8, findings);
+ else if(t.label === "PDF document") scanPDF(u8, findings, notes);
+ else if(t.kind === "doc" && u8[0]===0x50) await scanZipOffice(u8, findings, notes);
+ else if(t.kind === "image") notes.push("This format's internal metadata is not fully decoded by the inspector; the pixel re-render still drops it on export.");
+ else if(t.kind === "av") notes.push("Media containers store metadata (tags, telemetry, chapters) this inspector does not decode.");
+ return {bytes: u8.length, type: t, findings, notes};
+}
+
+/* ============================================================
+   image scrubber + strict verify
+============================================================ */
+const LEVELS = {0:[0,0,0,0.95], 1:[2,0.3,0.02,0.92], 2:[5,0.6,0.05,0.88], 3:[9,1,0.08,0.82]};
+const LEVEL_NAMES = {0:"Metadata only",1:"Light",2:"Strong",3:"Maximum"};
+
+async function decodeImage(file){
+ if(window.createImageBitmap){ try{ return await createImageBitmap(file, {imageOrientation:"from-image"}); }catch(e){} }
+ return await new Promise((res, rej)=>{ const i = new Image(); i.onload = ()=>res(i); i.onerror = ()=>rej(new Error("This browser cannot decode this image (try JPEG or PNG).")); i.src = objectURL(file); });
+}
+
+function stripJpegSegments(u8){
+ const out = [u8.slice(0,2)];
+ let p = 2;
+ while(p < u8.length){
+  const start = p;
+  if(u8[p++] !== 0xFF){ out.push(u8.slice(start)); break; }
+  while(u8[p] === 0xFF) p++;
+  const m = u8[p++];
+  if(m === 0xDA){ out.push(u8.slice(start)); break; }
+  if(m === 0xD9){ out.push(u8.slice(start, p)); break; }
+  if(m === 0x01 || (m >= 0xD0 && m <= 0xD7)){ out.push(u8.slice(start, p)); continue; }
+  const n = (u8[p]<<8) | u8[p+1];
+  const end = p + n;
+  const isMeta = (m >= 0xE1 && m <= 0xEF) || m === 0xFE || m === 0xE0;
+  if(!isMeta) out.push(u8.slice(start, end));
+  p = end;
+ }
+ return new Blob(out, {type:"image/jpeg"});
+}
+
+function strictVerify(u8){
+ if(u8[0]!==0xFF || u8[1]!==0xD8) return {ok:false, why:"output is not a JPEG"};
+ const dv = new DataView(u8.buffer, u8.byteOffset, u8.length);
+ let p = 2;
+ const OK = new Set([0xD8,0xD9,0xDA,0x01,0xC0,0xC1,0xC2,0xC4,0xDB,0xDD,0xD0,0xD1,0xD2,0xD3,0xD4,0xD5,0xD6,0xD7]);
+ while(p < u8.length){
+  if(u8[p++] !== 0xFF) return {ok:false, why:"corrupt marker stream"};
+  while(p < u8.length && u8[p] === 0xFF) p++;
+  const m = u8[p++];
+  if(m === 0xD9) return {ok:true};
+  if(m === 0xDA){
+   const n = dv.getUint16(p); p += n;
+   while(p < u8.length){ if(u8[p++] !== 0xFF) continue; while(p<u8.length && u8[p]===0xFF) p++; if(p>=u8.length) break; const nx=u8[p]; if(nx===0||(nx>=0xD0&&nx<=0xD7)){p++;continue} p--; break; }
+   continue;
+  }
+  if(m === 0x01 || (m >= 0xD0 && m <= 0xD7)) continue;
+  if(!OK.has(m)) return {ok:false, why:"forbidden segment 0xFF" + m.toString(16).toUpperCase() + " survived"};
+  const n = dv.getUint16(p);
+  if(n < 2 || p + n > u8.length) return {ok:false, why:"corrupt segment"};
+  p += n;
+ }
+ return {ok:false, why:"no end marker"};
+}
+
+async function scrubImage(file, level){
+ const bmp = await decodeImage(file);
+ const c = document.createElement("canvas");
+ try{
+  let w = bmp.width, h = bmp.height;
+  const [amp, blur, shrink, q] = LEVELS[level];
+  let scale = 1;
+  if(level){ const f = 1 - rand()*shrink; scale = Math.min(f, 2048/Math.max(w,h)); }
+  else if(w*h > 24e6) throw new Error("Metadata-only mode is limited to 24 megapixels; pick a pixel treatment.");
+  c.width = Math.max(1, Math.round(w*scale)); c.height = Math.max(1, Math.round(h*scale));
+  const x = c.getContext("2d", {willReadFrequently:true});
+  x.fillStyle = "#fff"; x.fillRect(0,0,c.width,c.height);
+  if(blur) x.filter = "blur(" + blur + "px)";
+  x.drawImage(bmp, 0, 0, c.width, c.height);
+  x.filter = "none";
+  if(amp){
+   const d = x.getImageData(0,0,c.width,c.height), px = d.data, rnd = new Uint8Array(65536);
+   for(let i=0;i<px.length;i+=4){
+    if(i % 65536 === 0) crypto.getRandomValues(rnd);
+    for(let j=0;j<3;j++) px[i+j] += (rnd[(i+j)%65536]/255 - .5) * 2 * amp;
+   }
+   x.putImageData(d, 0, 0);
+  }
+  const raw = await new Promise((res, rej)=>c.toBlob(b => b ? res(b) : rej(new Error("JPEG encoder unavailable")), "image/jpeg", q));
+  const bytes = new Uint8Array(await raw.arrayBuffer());
+  const stripped = stripJpegSegments(bytes);
+  const check = strictVerify(new Uint8Array(await stripped.arrayBuffer()));
+  if(!check.ok) throw new Error("Verification failed: " + check.why);
+  return stripped;
+ } finally { if(bmp.close) bmp.close(); c.width = c.height = 1; }
+}
+
+/* ============================================================
+   text scrubber
+============================================================ */
+const INVISIBLES = {
+ "​":"zero-width space","‌":"zero-width non-joiner","‍":"zero-width joiner",
+ "‎":"left-to-right mark","‏":"right-to-left mark","‪":"bidi embedding","‫":"bidi override","‬":"bidi pop","‭":"bidi override","‮":"bidi override",
+ "⁦":"bidi isolate","⁧":"bidi isolate","⁨":"bidi isolate","⁩":"bidi pop isolate",
+ "⁠":"word joiner","⁡":"invisible operator","⁢":"invisible operator","⁣":"invisible separator","⁤":"invisible operator",
+ "﻿":"byte-order mark / zero-width no-break space","­":"soft hyphen","͏":"combining grapheme joiner",
+ "᠎":"Mongolian vowel separator","ᅟ":"Hangul filler","ᅠ":"Hangul filler","ﾠ":"halfwidth Hangul filler",
+ "឴":"Khmer invisible","឵":"Khmer invisible",
+ "":"line separator","":"paragraph separator"
+};
+const ODD_SPACES = {" ":"non-breaking space"," ":"ogham space"," ":"en quad"," ":"em quad"," ":"en space"," ":"em space"," ":"thick space"," ":"mid space"," ":"thin space"," ":"figure space"," ":"punctuation space"," ":"hair space"," ":"very thin space"," ":"narrow no-break space"," ":"medium math space","　":"ideographic space"};
+for(let i=0xFE00;i<=0xFE0F;i++) INVISIBLES[String.fromCodePoint(i)] = "variation selector";
+for(let i=0xE0100;i<=0xE01EF;i++) INVISIBLES[String.fromCodePoint(i)] = "variation selector supplement";
+for(let i=0xE0001;i<=0xE007F;i++) INVISIBLES[String.fromCodePoint(i)] = "tag character (steganographic)";
+const HOMOGLYPHS = {
+ "А":"A","В":"B","Е":"E","К":"K","М":"M","Н":"H","О":"O","Р":"P","С":"C","Т":"T","Х":"X","Ѕ":"S","І":"I","Ј":"J",
+ "а":"a","е":"e","о":"o","р":"p","с":"c","х":"x","у":"y","і":"i","ј":"j","ѕ":"s","ԁ":"d","ԛ":"q","ԝ":"w",
+ "Α":"A","Β":"B","Ε":"E","Ζ":"Z","Η":"H","Ι":"I","Κ":"K","Μ":"M","Ν":"N","Ο":"O","Ρ":"P","Τ":"T","Υ":"Y","Χ":"X",
+ "α":"a","ο":"o","ν":"v","ρ":"p","τ":"t","χ":"x","ι":"i","κ":"k"
+};
+const PUNCT = {"‘":"'","’":"'","‚":"'","‛":"'","“":"\"","”":"\"","„":"\"","‟":"\"","–":"-","—":"-","―":"-","…":"...","ﬁ":"fi","ﬂ":"fl","ﬀ":"ff","ﬃ":"ffi","ﬄ":"ffl","′":"'","″":"\"","•":"*","·":"-","∙":"-","∗":"*"};
+const TRACK_PARAMS = new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","utm_id","utm_name","utm_cid","utm_reader","utm_referrer","utm_social","fbclid","gclid","gclsrc","dclid","msclkid","mc_cid","mc_eid","igshid","si","spm","ref_","_ga","_gl","yclid","twclid","li_fat_id","epik","ved","usg","scid","mibextid","rb_clickid","wickedid","vero_id","wickedid","ttclid","sscid"]);
+
+function cleanText(input, opts){
+ const changes = {}, flags = [];
+ const add = (label, n) => { changes[label] = (changes[label]||0) + n; };
+ let letters = 0, latin = 0;
+ for(const ch of input){ if(/[A-Za-z]/.test(ch)) latin++; if(/\p{L}/u.test(ch)) letters++; }
+ const mostlyLatin = letters === 0 || latin / letters > 0.6;
+
+ let out = "";
+ for(const ch of input){
+  const cp = ch.codePointAt(0);
+  if(INVISIBLES[ch]){ add(INVISIBLES[ch], 1); continue; }
+  if(cp < 32 && ch !== "\n" && ch !== "\t"){ add("control character", 1); continue; }
+  if(cp >= 0x7F && cp <= 0x9F){ add("control character", 1); continue; }
+  if(ODD_SPACES[ch]){ add(ODD_SPACES[ch] + " → normal space", 1); out += " "; continue; }
+  if(ch === "" || ch === ""){ add("line/paragraph separator → newline", 1); out += "\n"; continue; }
+  if(opts.punct && PUNCT[ch]){ add("'" + ch + "' → '" + PUNCT[ch] + "'", 1); out += PUNCT[ch]; continue; }
+  if(opts.homo && HOMOGLYPHS[ch]){
+   if(mostlyLatin){ add("look-alike letter '" + ch + "' → '" + HOMOGLYPHS[ch] + "'", 1); out += HOMOGLYPHS[ch]; continue; }
+   add("look-alike letter kept (text not mostly Latin): '" + ch + "'", 1);
+  }
+  out += ch;
+ }
+
+ if(opts.urls){
+  out = out.replace(/https?:\/\/[^\s<>"'）)\]]+/g, url => {
+   try{
+    const u = new URL(url);
+    let removed = 0;
+    for(const k of [...u.searchParams.keys()]){ if(TRACK_PARAMS.has(k.toLowerCase()) || k.toLowerCase().startsWith("utm_")){ u.searchParams.delete(k); removed++; } }
+    if(removed){ add("tracking parameters stripped from links", removed); return u.toString(); }
+    return url;
+   }catch(e){ return url; }
+  });
+ }
+
+ const flag = (label, re, note) => {
+  const m = input.match(re);
+  if(m && m.length) flags.push({label, count: m.length, sample: [...new Set(m)].slice(0,3).map(s => s.length > 60 ? s.slice(0,60) + "…" : s), note});
+ };
+ flag("Email address", /[\w.+-]+@[\w-]+\.[\w.]+/g, "identifies an account or person");
+ flag("Phone-like number", /(?:\+\d[\d\s().-]{7,}\d|\(\d{3}\)\s?\d{3}[\s-]?\d{4})/g, "can identify a person or place");
+ flag("Username in file path", /(?:\/Users\/|\/home\/|[A-Z]:\\Users\\)[\w.\- ]+/g, "reveals a device username");
+ flag("IP address", /\b\d{1,3}(?:\.\d{1,3}){3}\b/g, "can locate a network");
+ flag("Date", /\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}[\/]\d{1,2}[\/]\d{2,4})\b/g, "dates narrow down time and timezone");
+ flag("@handle", /(?:^|\W)@[A-Za-z0-9_.]{2,}/gm, "identifies an account");
+ flag("Quoted-reply header", /^(?:From|Sent|To|Subject): .+|^On .{5,80}wrote:/gm, "reveals who said what, and when");
+ flag("Possible token / key", /\b(?:AKIA[0-9A-Z]{16}|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{5,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[\w-]{10,})/g, "a credential — never paste these anywhere; rotate it if exposed");
+ flag("UUID / unique ID", /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "may link to a document, device, or account");
+ flag("Long encoded blob", /(?<![\w+/=])[A-Za-z0-9+/]{80,}={0,2}(?![\w+/=])/g, "may be encoded data, tokens, or embedded content");
+
+ return {out, changes, flags, mostlyLatin};
+}
+
+/* ============================================================
+   UI: shared
+============================================================ */
+let busy = false, epoch = 0;
+function clearAll(){
+ epoch++;
+ urls.forEach(u => URL.revokeObjectURL(u)); urls.clear();
+ $("results").replaceChildren();
+}
+function controls(v){
+ busy = v;
+ ["go","file","strength","clear","goText","txtIn","clearText"].forEach(id => { const e = $(id); if(e) e.disabled = v; });
+}
+
+$("tabFile").onclick = () => { $("tabFile").classList.add("on"); $("tabText").classList.remove("on"); $("paneFile").hidden = false; $("paneText").hidden = true; };
+$("tabText").onclick = () => { $("tabText").classList.add("on"); $("tabFile").classList.remove("on"); $("paneText").hidden = false; $("paneFile").hidden = true; };
+$("file").onchange = () => { $("selected").textContent = $("file").files[0] ? $("file").files[0].name + " · " + $("file").files[0].size.toLocaleString() + " bytes" : "No file selected"; };
+$("clear").onclick = () => { clearAll(); $("file").value = ""; $("selected").textContent = "No file selected"; $("status").textContent = "Session cleared. Original file untouched."; };
+$("clearText").onclick = () => { clearAll(); $("txtIn").value = ""; };
+
+/* ---------- findings renderer ---------- */
+function findingsCard(title, report, parent){
+ const card = el("section", null, parent); card.className = "card";
+ el("h2", title, card);
+ el("p", "Size: " + report.bytes.toLocaleString() + " bytes · " + report.type.label, card).className = "hint";
+ const idf = report.findings.filter(f => f.risk !== "info" || true);
+ if(!report.findings.length){
+  const v = el("div", "No embedded metadata fields found by this inspector.", card); v.className = "verdict ok";
+ } else {
+  const t = el("table", null, card);
+  const head = el("tr", null, t); el("th", "Field", head); el("th", "Value", head);
+  for(const f of report.findings){
+   const tr = el("tr", null, t); tr.className = f.risk;
+   el("td", f.label + (f.where && f.where !== "JPEG" ? "  ·  " + f.where : ""), tr).className = "k";
+   el("td", String(f.value), tr);
+  }
+  const highs = report.findings.filter(f => f.risk === "high").length;
+  const meds = report.findings.filter(f => f.risk === "med").length;
+  const v = el("div", highs ? highs + " high-risk item(s)" + (meds ? ", " + meds + " moderate" : "") : (meds ? meds + " moderate-risk item(s)" : report.findings.length + " informational item(s)"), card);
+  v.className = "verdict " + (highs ? "no" : meds ? "warn" : "ok");
+ }
+ for(const n of report.notes) el("p", "Note: " + n, card).className = "hint";
+ return card;
+}
+
+function removedList(before, after, parent){
+ const gone = before.findings.filter(b => !after.findings.some(a => a.label === b.label && a.value === b.value));
+ const kept = after.findings.filter(a => a.risk !== "info");
+ if(!gone.length && !kept.length) return;
+ const d = el("div", null, parent);
+ el("h3", "Removal ledger", d);
+ if(gone.length){ el("p", "Removed (" + gone.length + "):", d).className = "hint";
+  const ul = el("ul", null, d); ul.className = "tight";
+  for(const g of gone) el("li", g.label, ul);
+ }
+ if(kept.length){ el("p", "Still present:", d).className = "hint";
+  const ul = el("ul", null, d); ul.className = "tight";
+  for(const k of kept) el("li", k.label, ul);
+ }
+}
+
+/* ---------- desktop gate card ---------- */
+function gateCard(report, fileName){
+ const card = el("section", null, $("results")); card.className = "card stop";
+ el("div", "⛔ DESKTOP TOOL REQUIRED — DO NOT SEND THIS FILE YET", card).className = "stop-title";
+ const reasons = {
+  doc: "This file type (" + report.type.label + ") can hide data in places a phone browser cannot safely rewrite: incremental saves, layers, comments, tracked changes, embedded files, and compressed streams. Removing metadata here would be incomplete — and a false 'clean' is worse than no tool.",
+  av: "Audio/video containers store tags, telemetry (GPS tracks on many cameras), chapters, and extra streams. Safe removal needs re-muxing with a real tool.",
+  unknown: "This format is unrecognized. Nothing can be promised about what it contains."
+ };
+ el("p", reasons[report.type.kind] || reasons.unknown, card);
+ const tools = el("ul", null, card); tools.className = "tight";
+ if(report.type.kind === "doc"){
+  el("li", "PDF: on a computer, use Acrobat “Sanitize/Remove hidden information”, or qpdf + exiftool -all= — then re-inspect the saved output.", tools);
+  el("li", "Office: open on a computer → File → Info → Check for Issues → Inspect Document, remove everything, save as a new file.", tools);
+ } else if(report.type.kind === "av"){
+  el("li", "ffmpeg -i in -map_metadata -1 -c copy out  (drops container metadata; re-encode to also drop per-stream data)", tools);
+ } else {
+  el("li", "exiftool -a -u -g1 <file>  on a computer to see what is inside before sending.", tools);
+ }
+ el("p", "No save button is offered for this file on purpose. Come back to this on your computer.", card).className = "hint";
+ findingsCard("What could be seen from here (partial)", report, $("results"));
+}
+
+/* ---------- file flow ---------- */
+$("go").onclick = async () => {
+ if(busy) return;
+ const f = $("file").files[0];
+ if(!f){ $("status").textContent = "Choose a file first."; return; }
+ if(f.size > 100*1024*1024){ $("status").textContent = "Choose a file under 100 MB."; return; }
+ clearAll();
+ const token = epoch;
+ controls(true);
+ $("status").textContent = "Inspecting on this device…";
+ try{
+  const before = await inspect(f);
+  if(token !== epoch) return;
+  if(before.type.kind !== "image"){
+   gateCard(before, f.name);
+   $("status").textContent = "Stopped: this file type needs a desktop tool.";
+   return;
+  }
+  const beforeCard = findingsCard("BEFORE — what your file carries", before, $("results"));
+  const img = el("img", null, beforeCard); img.alt = "original preview"; img.src = objectURL(f);
+  $("status").textContent = "Scrubbing…";
+  const level = Number($("strength").value);
+  const clean = await scrubImage(f, level);
+  if(token !== epoch) return;
+  const after = await inspect(clean);
+  const verify = strictVerify(new Uint8Array(await clean.arrayBuffer()));
+  const card = el("section", null, $("results"));
+  card.className = "card " + (verify.ok && !after.findings.some(x => x.risk !== "info") ? "good" : "bad");
+  el("h2", "AFTER — clean copy (" + LEVEL_NAMES[level] + ")", card);
+  el("p", "Size: " + clean.size.toLocaleString() + " bytes · fresh JPEG, re-encoded from pixels only", card).className = "hint";
+  const im2 = el("img", null, card); im2.alt = "clean copy preview"; im2.src = objectURL(clean);
+  if(after.findings.length){
+   const t = el("table", null, card);
+   const head = el("tr", null, t); el("th","Field",head); el("th","Value",head);
+   for(const fnd of after.findings){ const tr = el("tr",null,t); tr.className = fnd.risk; el("td", fnd.label, tr).className="k"; el("td", String(fnd.value), tr); }
+  }
+  removedList(before, after, card);
+  const passed = verify.ok && !after.findings.some(x => x.risk !== "info");
+  const v = el("div", passed
+   ? "VERIFIED CLEAN: structural whitelist passed — no metadata segments, no GPS, no serials, no XMP, no thumbnail. Only pixel data remains."
+   : "NOT CLEAN: " + (verify.ok ? "residual fields detected" : verify.why) + " — saving is blocked.", card);
+  v.className = "verdict " + (passed ? "ok" : "no");
+  if(passed){
+   const a8 = new Uint8Array(8); crypto.getRandomValues(a8);
+   const name = "CLEAN-" + Array.from(a8, b => b.toString(16).padStart(2,"0")).join("") + ".jpg";
+   const file = new File([clean], name, {type:"image/jpeg"});
+   const b = el("button", "Save / share clean copy", card);
+   b.onclick = async () => {
+    try{
+     if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file]}); return; }
+     const link = document.createElement("a"); link.href = objectURL(file); link.download = name;
+     document.body.append(link); link.click(); link.remove();
+    }catch(e){ if(e.name !== "AbortError") $("status").textContent = "Save failed: " + e.message; }
+   };
+  }
+  el("p", "Reminder: this verified the file's container only. Look at the picture itself — faces, signs, screens, and documents visible in it are still visible.", card).className = "hint";
+  $("status").textContent = "Done.";
+ }catch(e){
+  $("status").textContent = "Could not process: " + e.message;
+ }finally{ controls(false); }
+};
+
+/* ---------- text flow ---------- */
+$("goText").onclick = () => {
+ clearAll();
+ const input = $("txtIn").value;
+ if(!input){ $("status").textContent = ""; return; }
+ const {out, changes, flags} = cleanText(input, {
+  urls: $("optUrls").checked, punct: $("optPunct").checked, homo: $("optHomo").checked
+ });
+ const card = el("section", null, $("results")); card.className = "card good";
+ el("h2", "Cleaned text", card);
+ const ta = el("textarea", null, card); ta.value = out; ta.readOnly = true;
+ const totalChanges = Object.values(changes).reduce((a,b)=>a+b, 0);
+ const b = el("button", "Copy clean text", card);
+ b.onclick = async () => {
+  try{ await navigator.clipboard.writeText(out); b.textContent = "Copied ✓"; }
+  catch(e){ ta.select(); document.execCommand("copy"); b.textContent = "Copied ✓"; }
+  setTimeout(()=>b.textContent = "Copy clean text", 1500);
+ };
+ const ch = el("div", null, card);
+ el("h3", "Removed (" + totalChanges + " change" + (totalChanges===1?"":"s") + ")", ch);
+ if(totalChanges){
+  const ul = el("ul", null, ch); ul.className = "tight";
+  for(const [k,v] of Object.entries(changes)) el("li", k + " × " + v, ul);
+ } else el("p", "Nothing hidden found — the text was already plain.", ch).className = "hint";
+ const fc = el("section", null, $("results")); fc.className = "card " + (flags.length ? "stop" : "good");
+ el("h2", "Content only you can judge", fc);
+ if(!flags.length){
+  el("div", "No common identifiers (emails, phones, dates, handles, paths, tokens) detected.", fc).className = "verdict ok";
+ } else {
+  el("p", "These are NOT removed — read them and edit by hand before sending:", fc);
+  for(const f of flags){
+   const d = el("div", null, fc);
+   el("h3", f.label + " × " + f.count + "  —  " + f.note, d);
+   const ul = el("ul", null, d); ul.className = "tight";
+   for(const s of f.sample) el("li", s, ul);
+  }
+  el("div", "Also remember: your wording itself can identify you. Distinctive phrases can be searched.", fc).className = "verdict warn";
+ }
+};
+</script>
+</body>
+</html>
