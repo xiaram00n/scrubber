@@ -70,7 +70,7 @@ ul.tight li{margin:3px 0}
 
 <!-- ================= FILE PANEL ================= -->
 <div id="paneFile" class="tabc">
-<p class="hint" style="margin-top:0"><b>How this works:</b> 1 · choose a file &nbsp;→&nbsp; 2 · choose what to do &nbsp;→&nbsp; 3 · press the green button. The button always matches the action you chose. Your original file is never modified — a clean copy is made separately and must pass verification before you may save it.</p>
+<p class="hint" style="margin-top:0"><b>How this works:</b> 1 · choose a file &nbsp;→&nbsp; 2 · choose what to do &nbsp;→&nbsp; 3 · press the green button. The button always matches the action you chose. Your original file is never modified — a clean copy is made separately and must pass verification before you may save it. Text files (.txt, .md, .json, …) are cleaned like pasted text and can be saved as a clean file.</p>
 <label class="pick">1 · Choose a file<input id="file" type="file"></label>
 <p class="hint" id="selected">No file selected</p>
 <div id="imgOpts">
@@ -79,14 +79,19 @@ ul.tight li{margin:3px 0}
 <option value="both" selected>Inspect &amp; scrub — show what’s inside, then build a verified clean copy</option>
 <option value="inspect">Inspect only — show what’s inside, change nothing, make no copy</option>
 </select></label>
-<label id="strengthLabel">3 · Pixel treatment (applies to the clean copy)
+<label id="formatLabel">3 · Output format (for images)
+<select id="outfmt">
+<option value="jpeg" selected>JPEG — ordinary photo, no iPhone giveaway</option>
+<option value="png">PNG — lossless, keeps sharp edges (graphics/screenshots)</option>
+</select></label>
+<label id="strengthLabel">4 · Pixel treatment (applies to the clean copy)
 <select id="strength">
 <option value="0">Metadata only · pixels untouched</option>
 <option value="1">Light · slight noise</option>
 <option value="2" selected>Strong · noise + resize + blur</option>
 <option value="3">Maximum · heavy noise + resize + blur</option>
 </select></label>
-<p class="hint">Pixel treatments fight sensor-noise and processing fingerprinting. They alter the picture slightly and are <b>not</b> a guarantee against image matching. Only pixel treatments resist camera-sensor fingerprinting; metadata-only mode does not.</p>
+<p class="hint">iPhone HEIC photos are converted to the output format you choose — the clean copy never carries the HEIC/iPhone signature. Pixel treatments fight sensor-noise and processing fingerprinting; they alter the picture slightly and are <b>not</b> a guarantee against image matching.</p>
 </div>
 <div class="actions">
 <button id="go">Inspect &amp; scrub</button>
@@ -535,7 +540,29 @@ function strictVerify(u8){
  return {ok:false, why:"no end marker"};
 }
 
-async function scrubImage(file, level){
+const PNG_SAFE = new Set(["IHDR","PLTE","IDAT","IEND","tRNS","sRGB","gAMA","cHRM","pHYs","sBIT"]);
+function strictVerifyPNG(u8){
+ if(![137,80,78,71,13,10,26,10].every((v,i)=>u8[i]===v)) return {ok:false, why:"output is not a PNG"};
+ const dv = new DataView(u8.buffer, u8.byteOffset, u8.length);
+ let p = 8;
+ while(p + 12 <= u8.length){
+  const n = dv.getUint32(p), t = txt(u8, p+4, p+8);
+  if(n > u8.length - p - 12) return {ok:false, why:"corrupt PNG chunk"};
+  if(!PNG_SAFE.has(t)) return {ok:false, why:"non-image chunk survived: " + t};
+  p += 12 + n;
+  if(t === "IEND") return {ok:true};
+ }
+ return {ok:false, why:"no IEND chunk"};
+}
+
+function textLike(u8){
+ if(!u8.length) return true;
+ const n = Math.min(u8.length, 8000);
+ for(let i=0;i<n;i++){ const b = u8[i]; if(b === 0 || (b < 9) || (b > 13 && b < 32 && b !== 27)) return false; }
+ return true;
+}
+
+async function scrubImage(file, level, outfmt){
  const bmp = await decodeImage(file);
  const c = document.createElement("canvas");
  try{
@@ -558,12 +585,18 @@ async function scrubImage(file, level){
    }
    x.putImageData(d, 0, 0);
   }
+  if(outfmt === "png"){
+   const raw = await new Promise((res, rej)=>c.toBlob(b => b ? res(b) : rej(new Error("PNG encoder unavailable")), "image/png"));
+   const check = strictVerifyPNG(new Uint8Array(await raw.arrayBuffer()));
+   if(!check.ok) throw new Error("Verification failed: " + check.why);
+   return {blob: raw, ext: "png", mime: "image/png"};
+  }
   const raw = await new Promise((res, rej)=>c.toBlob(b => b ? res(b) : rej(new Error("JPEG encoder unavailable")), "image/jpeg", q));
   const bytes = new Uint8Array(await raw.arrayBuffer());
   const stripped = stripJpegSegments(bytes);
   const check = strictVerify(new Uint8Array(await stripped.arrayBuffer()));
   if(!check.ok) throw new Error("Verification failed: " + check.why);
-  return stripped;
+  return {blob: stripped, ext: "jpg", mime: "image/jpeg"};
  } finally { if(bmp.close) bmp.close(); c.width = c.height = 1; }
 }
 
@@ -666,6 +699,7 @@ function syncAction(){
  const inspectOnly = $("mode").value === "inspect";
  $("go").textContent = inspectOnly ? "Run inspection only" : "Inspect & scrub";
  $("strengthLabel").hidden = inspectOnly;
+ $("formatLabel").hidden = inspectOnly;
 }
 $("mode").onchange = () => { syncAction(); clearAll(); $("status").textContent = $("mode").value === "inspect" ? "Inspect-only selected. Nothing will be changed and no copy will be made." : "Ready. Your original file is never modified."; };
 syncAction();
@@ -750,12 +784,21 @@ $("go").onclick = async () => {
  try{
   const before = await inspect(f);
   if(token !== epoch) return;
+  const inspectOnly = $("mode").value === "inspect";
+  if(before.type.kind === "unknown"){
+   const bytes = new Uint8Array(await f.arrayBuffer());
+   if(textLike(bytes)){
+    if(inspectOnly){ findingsCard("INSPECTION REPORT — text-like file", before, $("results")); el("p", "Text-like file detected. Switch to “Inspect & scrub” to clean invisible characters and tracking links.", $("results")).className = "hint"; $("status").textContent = "Inspection done — nothing was changed."; return; }
+    runTextClean(new TextDecoder().decode(bytes), f.name);
+    $("status").textContent = "Done.";
+    return;
+   }
+  }
   if(before.type.kind !== "image"){
    gateCard(before, f.name);
    $("status").textContent = "Stopped: this file type needs a desktop tool.";
    return;
   }
-  const inspectOnly = $("mode").value === "inspect";
   const beforeCard = findingsCard(inspectOnly ? "INSPECTION REPORT — what your file carries" : "BEFORE — what your file carries", before, $("results"));
   const img = el("img", null, beforeCard); img.alt = "original preview"; img.src = objectURL(f);
   if(inspectOnly){
@@ -765,14 +808,15 @@ $("go").onclick = async () => {
   }
   $("status").textContent = "Scrubbing…";
   const level = Number($("strength").value);
-  const clean = await scrubImage(f, level);
+  const outfmt = $("outfmt").value;
+  const {blob: clean, ext, mime} = await scrubImage(f, level, outfmt);
   if(token !== epoch) return;
   const after = await inspect(clean);
-  const verify = strictVerify(new Uint8Array(await clean.arrayBuffer()));
+  const verify = ext === "png" ? strictVerifyPNG(new Uint8Array(await clean.arrayBuffer())) : strictVerify(new Uint8Array(await clean.arrayBuffer()));
   const card = el("section", null, $("results"));
   card.className = "card " + (verify.ok && !after.findings.some(x => x.risk !== "info") ? "good" : "bad");
-  el("h2", "AFTER — clean copy (" + LEVEL_NAMES[level] + ")", card);
-  el("p", "Size: " + clean.size.toLocaleString() + " bytes · fresh JPEG, re-encoded from pixels only", card).className = "hint";
+  el("h2", "AFTER — clean copy (" + LEVEL_NAMES[level] + " · " + ext.toUpperCase() + ")", card);
+  el("p", "Size: " + clean.size.toLocaleString() + " bytes · fresh " + ext.toUpperCase() + ", re-encoded from pixels only" + (before.type.label.startsWith("HEIC") || before.type.label.startsWith("AVIF") ? " · converted from " + before.type.label.split(" ")[0] + " — no iPhone/format signature remains" : ""), card).className = "hint";
   const im2 = el("img", null, card); im2.alt = "clean copy preview"; im2.src = objectURL(clean);
   if(after.findings.length){
    const t = el("table", null, card);
@@ -782,13 +826,13 @@ $("go").onclick = async () => {
   removedList(before, after, card);
   const passed = verify.ok && !after.findings.some(x => x.risk !== "info");
   const v = el("div", passed
-   ? "VERIFIED CLEAN: structural whitelist passed — no metadata segments, no GPS, no serials, no XMP, no thumbnail. Only pixel data remains."
+   ? "VERIFIED CLEAN: structural whitelist passed — no metadata, no GPS, no serials, no thumbnail. Only pixel data remains."
    : "NOT CLEAN: " + (verify.ok ? "residual fields detected" : verify.why) + " — saving is blocked.", card);
   v.className = "verdict " + (passed ? "ok" : "no");
   if(passed){
    const a8 = new Uint8Array(8); crypto.getRandomValues(a8);
-   const name = "CLEAN-" + Array.from(a8, b => b.toString(16).padStart(2,"0")).join("") + ".jpg";
-   const file = new File([clean], name, {type:"image/jpeg"});
+   const name = "CLEAN-" + Array.from(a8, b => b.toString(16).padStart(2,"0")).join("") + "." + ext;
+   const file = new File([clean], name, {type:mime});
    const b = el("button", "Save / share clean copy", card);
    b.onclick = async () => {
     try{
@@ -797,6 +841,7 @@ $("go").onclick = async () => {
      document.body.append(link); link.click(); link.remove();
     }catch(e){ if(e.name !== "AbortError") $("status").textContent = "Save failed: " + e.message; }
    };
+   el("p", "When saving: choose “Save to Files”, not “Save Image”. Photos re-wraps images with its own data; Files stores the exact clean bytes.", card).className = "hint";
   }
   el("p", "Reminder: this verified the file's container only. Look at the picture itself — faces, signs, screens, and documents visible in it are still visible.", card).className = "hint";
   $("status").textContent = "Done.";
@@ -806,15 +851,12 @@ $("go").onclick = async () => {
 };
 
 /* ---------- text flow ---------- */
-$("goText").onclick = () => {
- clearAll();
- const input = $("txtIn").value;
- if(!input){ $("status").textContent = ""; return; }
+function runTextClean(input, sourceName){
  const {out, changes, flags} = cleanText(input, {
   urls: $("optUrls").checked, punct: $("optPunct").checked, homo: $("optHomo").checked
  });
  const card = el("section", null, $("results")); card.className = "card good";
- el("h2", "Cleaned text", card);
+ el("h2", "Cleaned text" + (sourceName ? " — from " + sourceName : ""), card);
  const ta = el("textarea", null, card); ta.value = out; ta.readOnly = true;
  const totalChanges = Object.values(changes).reduce((a,b)=>a+b, 0);
  const b = el("button", "Copy clean text", card);
@@ -823,6 +865,19 @@ $("goText").onclick = () => {
   catch(e){ ta.select(); document.execCommand("copy"); b.textContent = "Copied ✓"; }
   setTimeout(()=>b.textContent = "Copy clean text", 1500);
  };
+ if(sourceName){
+  const base = sourceName.replace(/\.[^.]+$/, "");
+  const extM = sourceName.match(/\.[^.]+$/); const ext = extM ? extM[0] : ".txt";
+  const file = new File([out], base + "-CLEAN" + ext, {type:"text/plain"});
+  const sb = el("button", "Save / share as clean file", card); sb.className = "secondary"; sb.style.marginLeft = "8px";
+  sb.onclick = async () => {
+   try{
+    if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file]}); return; }
+    const link = document.createElement("a"); link.href = objectURL(file); link.download = file.name;
+    document.body.append(link); link.click(); link.remove();
+   }catch(e){ if(e.name !== "AbortError") $("status").textContent = "Save failed: " + e.message; }
+  };
+ }
  const ch = el("div", null, card);
  el("h3", "Removed (" + totalChanges + " change" + (totalChanges===1?"":"s") + ")", ch);
  if(totalChanges){
@@ -843,6 +898,13 @@ $("goText").onclick = () => {
   }
   el("div", "Also remember: your wording itself can identify you. Distinctive phrases can be searched.", fc).className = "verdict warn";
  }
+}
+
+$("goText").onclick = () => {
+ clearAll();
+ const input = $("txtIn").value;
+ if(!input){ return; }
+ runTextClean(input, null);
 };
 </script>
 </body>
