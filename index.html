@@ -73,7 +73,12 @@ ul.tight li{margin:3px 0}
 <label class="pick">Choose a file<input id="file" type="file"></label>
 <p class="hint" id="selected">No file selected</p>
 <div id="imgOpts">
-<label>Pixel treatment
+<label>Action
+<select id="mode">
+<option value="both" selected>Inspect &amp; scrub</option>
+<option value="inspect">Inspect only · change nothing</option>
+</select></label>
+<label id="strengthLabel">Pixel treatment
 <select id="strength">
 <option value="0">Metadata only · pixels untouched</option>
 <option value="1">Light · slight noise</option>
@@ -743,6 +748,7 @@ $("go").onclick = async () => {
   }
   const beforeCard = findingsCard("BEFORE — what your file carries", before, $("results"));
   const img = el("img", null, beforeCard); img.alt = "original preview"; img.src = objectURL(f);
+  if($("mode").value === "inspect"){ $("status").textContent = "Inspection done — nothing was changed."; return; }
   $("status").textContent = "Scrubbing…";
   const level = Number($("strength").value);
   const clean = await scrubImage(f, level);
