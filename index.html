@@ -726,6 +726,17 @@ $("clear").onclick = () => { clearAll(); $("file").value = ""; $("selected").tex
 $("clearText").onclick = () => { clearAll(); $("txtIn").value = ""; };
 
 /* ---------- findings renderer ---------- */
+function copyBtn(parent, label, getText){
+ const b = el("button", label, parent); b.className = "secondary"; b.style.marginTop = "8px";
+ b.onclick = async () => {
+  const text = getText();
+  try{ await navigator.clipboard.writeText(text); b.textContent = "Copied ✓"; }
+  catch(e){ const ta = el("textarea", null, parent); ta.value = text; ta.style.position="absolute"; ta.style.left="-9999px"; ta.select(); document.execCommand("copy"); ta.remove(); b.textContent = "Copied ✓"; }
+  setTimeout(()=>{ b.textContent = label; }, 1500);
+ };
+ el("p", "Copy is local-only — this page has no network access, so nothing can leave your device.", parent).className = "hint";
+ return b;
+}
 function findingsCard(title, report, parent){
  const card = el("section", null, parent); card.className = "card";
  el("h2", title, card);
@@ -747,6 +758,12 @@ function findingsCard(title, report, parent){
   v.className = "verdict " + (highs ? "no" : meds ? "warn" : "ok");
  }
  for(const n of report.notes) el("p", "Note: " + n, card).className = "hint";
+ copyBtn(card, "Copy report", () => {
+  let s = title + "\nSize: " + report.bytes.toLocaleString() + " bytes · " + report.type.label + "\n\n";
+  for(const f of report.findings) s += f.label + (f.where ? " (" + f.where + ")" : "") + ": " + f.value + "\n";
+  for(const n of report.notes) s += "Note: " + n + "\n";
+  return s;
+ });
  return card;
 }
 
@@ -786,6 +803,7 @@ function gateCard(report, fileName){
   el("li", "exiftool -a -u -g1 <file>  on a computer to see what is inside before sending.", tools);
  }
  el("p", "No save button is offered for this file on purpose. Come back to this on your computer.", card).className = "hint";
+ copyBtn(card, "Copy report", () => card.innerText);
  findingsCard("What could be seen from here (partial)", report, $("results"));
 }
 
@@ -859,8 +877,29 @@ $("go").onclick = async () => {
      document.body.append(link); link.click(); link.remove();
     }catch(e){ if(e.name !== "AbortError") $("status").textContent = "Save failed: " + e.message; }
    };
+   const cb = el("button", "Copy image to clipboard", card); cb.className = "secondary"; cb.style.marginLeft = "8px";
+   cb.onclick = async () => {
+    try{
+     if(!navigator.clipboard || !window.ClipboardItem) throw new Error("no image clipboard");
+     let pngBlob = clean;
+     if(mime !== "image/png"){
+      const bmp = await createImageBitmap(clean);
+      const cc = document.createElement("canvas"); cc.width = bmp.width; cc.height = bmp.height;
+      const cx = cc.getContext("2d"); cx.drawImage(bmp, 0, 0);
+      pngBlob = await new Promise((res, rej) => cc.toBlob(x => x ? res(x) : rej(new Error("encode failed")), "image/png"));
+      if(bmp.close) bmp.close(); cc.width = cc.height = 1;
+     }
+     await navigator.clipboard.write([new ClipboardItem({"image/png": pngBlob})]);
+     cb.textContent = "Copied ✓ — paste it anywhere, no file saved";
+    }catch(e){
+     cb.textContent = "Copy not supported here — use Save instead";
+    }
+    setTimeout(()=>{ cb.textContent = "Copy image to clipboard"; }, 2500);
+   };
+   el("p", "Copying the image pastes it directly into apps without saving a file — nothing touches your photo library or disk. Copy is local-only; this page has no network access.", card).className = "hint";
    el("p", "When saving: choose “Save to Files”, not “Save Image”. Photos re-wraps images with its own data; Files stores the exact clean bytes.", card).className = "hint";
   }
+  copyBtn(card, "Copy report", () => card.innerText);
   el("p", "Reminder: this verified the file's container only. Look at the picture itself — faces, signs, screens, and documents visible in it are still visible.", card).className = "hint";
   $("status").textContent = "Done.";
  }catch(e){
@@ -1078,6 +1117,7 @@ function renderLinkCard(input, onTor){
   const p = el("p", (risk==="high"?"🔴 ":risk==="med"?"🟡 ":risk==="ok"?"🟢 ":"⚪ ") + text, parent);
   p.className = "hint"; p.style.color = risk==="high" ? "#f2a3a3" : risk==="med" ? "#ecd391" : risk==="ok" ? "#9fe8b4" : "#9fb3ab";
  }
+ copyBtn(card, "Copy full link report", () => card.innerText);
  return {cleaned, card};
 }
 
