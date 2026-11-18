@@ -926,16 +926,21 @@ function runTextClean(input, sourceName){
   setTimeout(()=>b.textContent = "Copy clean text", 1500);
  };
  if(sourceName){
-  const base = sourceName.replace(/\.[^.]+$/, "");
   const extM = sourceName.match(/\.[^.]+$/); const ext = extM ? extM[0] : ".txt";
-  const file = new File([out], base + "-CLEAN" + ext, {type:"text/plain"});
+  const base = sourceName.replace(/\.[^.]+$/, "");
+  const file = new File([out], "CLEAN-" + base + ext, {type:"text/plain"});
   const sb = el("button", "Save / share as clean file", card); sb.className = "secondary"; sb.style.marginLeft = "8px";
   sb.onclick = async () => {
    try{
     if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file]}); return; }
+   }catch(e){ if(e.name === "AbortError") return; }
+   try{
     const link = document.createElement("a"); link.href = objectURL(file); link.download = file.name;
+    link.rel = "noopener";
     document.body.append(link); link.click(); link.remove();
-   }catch(e){ if(e.name !== "AbortError") $("status").textContent = "Save failed: " + e.message; }
+    sb.textContent = "Download started ✓";
+    setTimeout(()=>{ sb.textContent = "Save / share as clean file"; }, 2000);
+   }catch(e2){ $("status").textContent = "Save failed: " + e2.message; }
   };
  }
  const ch = el("div", null, card);
